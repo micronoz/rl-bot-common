@@ -23,8 +23,8 @@ def get_args():
         help='gail batch size (default: 128)')
     parser.add_argument(
         '--lookback',
-        type=int,
-        default=100,
+        action='append',
+        default=[100],
         help='Amount of timesteps to take past average over')
     parser.add_argument(
         '--index',
@@ -185,6 +185,7 @@ def get_args():
         action='store_true',
         default=False,
         help='use a linear schedule on the learning rate')
+
     args = parser.parse_args()
 
     args.cuda = not args.no_cuda and torch.cuda.is_available()
