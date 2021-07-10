@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="rl_bot_model",
-    version="0.0.3",
+    version="0.0.4",
     author="Nabi Ozberkman",
     author_email="n.ozberkman@gmail.com",
     description="Package for various reinforcement models",

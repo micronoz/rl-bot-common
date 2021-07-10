@@ -4,6 +4,8 @@ import torch.nn as nn
 from rl_bot_model.distributions import Bernoulli, Categorical, DiagGaussian
 from rl_bot_model.utils import init
 
+import numpy as np
+
 
 class Flatten(nn.Module):
     def forward(self, x):
@@ -52,8 +54,19 @@ class Policy(nn.Module):
         raise NotImplementedError
 
     def act(self, inputs, rnn_hxs, masks, deterministic=False):
+        # inputs = torch.nan_to_num_(inputs, nan=0.0, posinf=0.0, neginf=0.0)
         value, actor_features, rnn_hxs = self.base_run(inputs, rnn_hxs, masks)
-        dist = self.dist(actor_features)
+        try:
+            dist = self.dist(actor_features)
+        except:
+            infinites = np.isfinite(inputs.cpu().numpy())
+            torch.set_printoptions(profile="full")
+            # print(infinites.shape)
+            print(np.argwhere(infinites == False))
+            # print(inputs[:, :10])
+            nam = np.isnan(actor_features.cpu().numpy()).any()
+            # print(nam)
+            raise
 
         if deterministic:
             action = dist.mode()
@@ -80,14 +93,15 @@ class Policy(nn.Module):
 
 
 class NNBase(nn.Module):
-    def __init__(self, recurrent, recurrent_input_size, hidden_size):
+    def __init__(self, recurrent, recurrent_input_size, hidden_size, dropout, recurrent_layers):
         super(NNBase, self).__init__()
 
         self._hidden_size = hidden_size
         self._recurrent = recurrent
 
         if recurrent:
-            self.gru = nn.GRU(recurrent_input_size, hidden_size)
+            self.gru = nn.GRU(recurrent_input_size,
+                              hidden_size, dropout=dropout, num_layers=recurrent_layers)
             for name, param in self.gru.named_parameters():
                 if 'bias' in name:
                     nn.init.constant_(param, 0)
@@ -109,13 +123,13 @@ class NNBase(nn.Module):
         return self._hidden_size
 
     def _forward_gru(self, x, hxs, masks):
-        if x.size(0) == hxs.size(0):
-            x, hxs = self.gru(x.unsqueeze(0), (hxs * masks).unsqueeze(0))
+        if x.size(0) == hxs.size(1):
+            x, hxs = self.gru(x.unsqueeze(0), (hxs * masks))
             x = x.squeeze(0)
             hxs = hxs.squeeze(0)
         else:
             # x is a (T, N, -1) tensor that has been flatten to (T * N, -1)
-            N = hxs.size(0)
+            N = hxs.size(1)
             T = int(x.size(0) / N)
 
             # unflatten
@@ -142,7 +156,7 @@ class NNBase(nn.Module):
             # add t=0 and t=T to the list
             has_zeros = [0] + has_zeros + [T]
 
-            hxs = hxs.unsqueeze(0)
+            # hxs = hxs.unsqueeze(0)
             outputs = []
             for i in range(len(has_zeros) - 1):
                 # We can now process steps that don't have any zeros in masks together!
@@ -161,7 +175,7 @@ class NNBase(nn.Module):
             x = torch.cat(outputs, dim=0)
             # flatten
             x = x.view(T * N, -1)
-            hxs = hxs.squeeze(0)
+            # hxs = hxs.squeeze(0)
 
         return x, hxs
 
@@ -196,7 +210,7 @@ class CNNBase(NNBase):
 
 
 class MLPBase(NNBase):
-    def init_(m): return init(m, lambda x: nn.init.kaiming_normal_(x), lambda x: nn.init.
+    def init_(m): return init(m, lambda x: nn.init.kaiming_uniform_(x), lambda x: nn.init.
                               constant_(x, 0), 0)
 
     def basic_unit(input_size, output_size, dropout):
@@ -204,8 +218,9 @@ class MLPBase(NNBase):
                 nn.LeakyReLU()) if dropout == 0 else (MLPBase.init_(nn.Linear(input_size, output_size)),
                                                       nn.LeakyReLU(), nn.Dropout(dropout))
 
-    def __init__(self, num_inputs, recurrent=False, hidden_size=8, depth=3, dropout=0.0):
-        super(MLPBase, self).__init__(recurrent, num_inputs, hidden_size)
+    def __init__(self, num_inputs, recurrent=False, hidden_size=8, depth=3, dropout=0.0, recurrent_layers=2):
+        super(MLPBase, self).__init__(
+            recurrent, num_inputs, hidden_size, dropout, recurrent_layers)
 
         if recurrent:
             num_inputs = hidden_size
